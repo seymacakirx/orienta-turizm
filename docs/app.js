@@ -19,7 +19,7 @@ const icon=name=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" str
 const link=(url,inner,cls='',label='')=>`<a class="${cls}" ${safe(url)?`href="${safe(url)}" target="_blank" rel="noopener noreferrer"`:'href="#" data-unset="true"'} ${label?`aria-label="${escape(label)}"`:''}>${inner}</a>`;
 function data(s){const a=s[lang], o=config.services[s.id]||{};return {...s,title:a[0],spot:a[1],summary:a[2],leftTitle:texts[lang].plan,leftText:a[3],rightTitle:texts[lang].details,rightText:a[4],storyTitle:texts[lang].story,storyText:a[5],...o,...o[lang]};}
 const url=id=>`${BASE}/services/${id}/?lang=${lang}`;
-const BASE='/oryanta-turizm';
+const BASE='/orienta-turizm';
 const localPath=()=>location.pathname.startsWith(BASE)?location.pathname.slice(BASE.length)||'/':location.pathname;
 const home=()=>`${BASE}/?lang=${lang}`;
 const posts=window.SITE_POSTS||[];
