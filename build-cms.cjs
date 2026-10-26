@@ -2,7 +2,7 @@ const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const root=__dirname,web=path.join(root,'web'),out=path.join(root,'dist');
 const ctx={window:{}};vm.createContext(ctx);for(const f of ['config.js','content.js'])vm.runInContext(fs.readFileSync(path.join(web,f),'utf8'),ctx);
 const defaults={config:ctx.window.SITE_CONFIG,texts:ctx.window.SITE_TEXT,services:ctx.window.SERVICES};
-const assets={};function walk(dir){for(const f of fs.readdirSync(dir,{withFileTypes:true})){const p=path.join(dir,f.name);if(f.isDirectory())walk(p);else{const url='/'+path.relative(web,p).replaceAll('\\','/');assets[url]={body:fs.readFileSync(p).toString('base64'),type:({'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.png':'image/png'})[path.extname(p)]||'application/octet-stream'}}}}walk(web);
+const assets={};function walk(dir){for(const f of fs.readdirSync(dir,{withFileTypes:true})){const p=path.join(dir,f.name);if(f.isDirectory())walk(p);else{const url='/'+path.relative(web,p).replaceAll('\\','/');assets[url]={body:fs.readFileSync(p).toString('base64'),type:({'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.mp4':'video/mp4'})[path.extname(p)]||'application/octet-stream'}}}}walk(web);
 const source=['auth.mjs','validation.mjs','api.mjs'].map(f=>fs.readFileSync(path.join(root,'worker',f),'utf8').replaceAll('export async function','async function').replaceAll('export function','function')).join('\n');
 const browser=fs.readFileSync(path.join(web,'app.js'),'utf8');
 const start=browser.indexOf('const config='),end=browser.indexOf('function notify(');

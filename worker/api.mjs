@@ -17,7 +17,7 @@ export async function api(request,env,defaults){
  const u=new URL(request.url),path=u.pathname;
  const admin=path.startsWith('/api/admin');
  if(admin){
-  if(!await authorizedAdmin(request,env))return json({error:'Yetkili Cloudflare Access oturumu gerekli. Paneli yeniden açarak giriş yapın.'},403);
+  if(!await authorizedAdmin(request,env))return json({error:'Yönetici oturumu gerekli. Giriş sayfasından yeniden giriş yapın.'},403);
   if(request.method!=='GET'&&request.headers.get('Origin')!==u.origin)return json({error:'Geçersiz istek kaynağı.'},403);
  }
  if(path==='/api/geo')return json({country_code:request.cf?.country||''});
@@ -42,19 +42,6 @@ export async function api(request,env,defaults){
   if(r.meta.changes!==1)return json({error:'İçerik başka bir sekmede değişti. Sayfayı yenileyip güncel içerikle devam edin.'},409);
   return json({revision:body.revision+1,updatedAt:now});
  }
- if(path==='/api/admin/upload'&&request.method==='POST'){
-  if(Number(request.headers.get('Content-Length'))>42*1024*1024)return json({error:'Dosya en fazla 40 MB olabilir.'},413);
-  let form;try{form=await boundedForm(request,42*1024*1024)}catch(e){return json({error:e instanceof RangeError?'Dosya en fazla 40 MB olabilir.':'Geçersiz dosya formu.'},e instanceof RangeError?413:400)}const file=form.get('file');
-  if(!file||typeof file.arrayBuffer!=='function')return json({error:'Bir dosya seçin.'},400);
-  const isVideo=file.type==='video/mp4';if(file.size>(isVideo?40:8)*1024*1024)return json({error:isVideo?'Video en fazla 40 MB olabilir.':'Görsel en fazla 8 MB olabilir.'},413);
-  const bytes=new Uint8Array(await file.arrayBuffer());
-  const png=bytes[0]===137&&bytes[1]===80&&bytes[2]===78&&bytes[3]===71;
-  const jpg=bytes[0]===255&&bytes[1]===216&&bytes[2]===255;
-  const mp4=String.fromCharCode(...bytes.slice(4,8))==='ftyp';
-  if(!(file.type==='image/png'&&png||file.type==='image/jpeg'&&jpg||isVideo&&mp4))return json({error:'Yalnızca gerçek PNG, JPEG ve MP4 dosyaları kabul edilir.'},400);
-  const key='uploads/'+crypto.randomUUID()+'.'+(png?'png':jpg?'jpg':'mp4');
-  await env.BUCKET.put(key,bytes,{httpMetadata:{contentType:file.type}});
-  return json({url:'/media/'+key,name:file.name});
- }
+ if(path==='/api/admin/upload')return json({error:'Fotoğraf ve video yükleme geçici olarak kapalı. Mevcut görsel adresleri korunur.'},503);
  return json({error:'Bulunamadı.'},404);
 }

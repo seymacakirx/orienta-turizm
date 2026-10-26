@@ -9,19 +9,13 @@
   "build": { "command": "node build-cms.cjs" },
   "vars": {
     "STAGING": "true",
-    "ACCESS_ISSUER": "",
-    "ACCESS_AUD": ""
+    "ADMIN_USERNAME": "yonetici"
   },
-  // Set ADMIN_EMAILS through Wrangler secret / dashboard, never in Git.
+  // Set ADMIN_KEY_SHA256 through Worker secrets; generate with node scripts/create-admin-key.mjs.
   // Use the database UUID from Cloudflare. No resource is created by this file.
   "d1_databases": [{
     "binding": "DB",
     "database_name": "orienta-turizm-db",
     "database_id": "00000000-0000-0000-0000-000000000000",
     "migrations_dir": "drizzle"
-  }],
-  "r2_buckets": [{
-    "binding": "BUCKET",
-    "bucket_name": "orienta-turizm-media-staging"
-  }]
-}
+  }]}

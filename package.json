@@ -12,7 +12,8 @@
     "preview": "node preview-worker.mjs",
     "cf:dev": "wrangler dev --local",
     "cf:check": "wrangler deploy --dry-run",
-    "test:runtime": "node test-runtime.mjs"
+    "test:runtime": "node test-runtime.mjs",
+    "admin:key": "node scripts/create-admin-key.mjs"
   },
   "devDependencies": {
     "wrangler": "4.152.0"

@@ -1,13 +1,24 @@
 async function routeRequest(request, env) {
  const u = new URL(request.url);
+ if (u.pathname.startsWith('/api/auth/')) return authResponse(request, env);
  if (u.pathname.startsWith('/api/')) return api(request, env, DEFAULTS);
- if (u.pathname === '/admin' || u.pathname.startsWith('/admin/')) {
-  if (!await authorizedAdmin(request, env)) return new Response('Yetkili Cloudflare Access oturumu gerekli. /admin adresini Access koruması üzerinden açın.', {status: 403, headers: {'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex, nofollow'}});
+ if ((u.pathname === '/admin' || u.pathname.startsWith('/admin/')) && !['/admin/login','/admin/login.html','/admin/login.js','/admin/admin.css'].includes(u.pathname)) {
+  if (!await authorizedAdmin(request, env)) return new Response(null, {status:303, headers:{Location:'/admin/login','Cache-Control':'no-store','X-Robots-Tag':'noindex, nofollow'}});
  }
  if (!['GET', 'HEAD'].includes(request.method)) return new Response('Method not allowed', {status: 405, headers: {Allow: 'GET, HEAD'}});
  if (u.pathname.startsWith('/media/uploads/')) {
   const key = u.pathname.slice(7);
   if (!/^uploads\/[a-f0-9-]+\.(png|jpg|mp4)$/.test(key)) return new Response('Not found', {status: 404});
+  if (!env.BUCKET) {
+   const asset = ASSETS[u.pathname];
+   if (asset) return new Response(Uint8Array.from(atob(asset.body), c=>c.charCodeAt(0)), {headers:{'Content-Type':asset.type,'Cache-Control':'public,max-age=86400'}});
+   // Optional read-only fallback for previously uploaded media. No uploads or copies.
+   if (env.LEGACY_MEDIA_ORIGIN) {
+    const legacy = new URL(env.LEGACY_MEDIA_ORIGIN);
+    if (legacy.protocol === 'https:' && legacy.origin !== u.origin && !legacy.username && !legacy.password && legacy.pathname === '/' && !legacy.search && !legacy.hash) return Response.redirect(legacy.origin + u.pathname,307);
+   }
+   return new Response('Medya dosyası bu test ortamına henüz taşınmadı.',{status:404});
+  }
   const ranged = request.headers.has('Range');
   const obj = await env.BUCKET.get(key, ranged ? {range: request.headers} : undefined);
   if (!obj) return new Response('Not found', {status: 404});
@@ -27,6 +38,7 @@ async function routeRequest(request, env) {
   return seoResponse(request, env);
  }
  let p = u.pathname;
+ if (p === '/admin/login') p = '/admin/login.html';
  if (p === '/admin' || p === '/admin/') p = '/admin/index.html';
  const a = ASSETS[p];
  if (!a) return new Response('Not found', {status: 404});

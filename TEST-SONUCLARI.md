@@ -1,25 +1,22 @@
-# Taşıma kontrolü — 26 Ekim 2026
+# Kart gerektirmeyen Cloudflare sürümü — test raporu
 
-Başlangıç: `main` / `c9acefd04c5933d1e68362b8ece1347f257729e6`.
-Çalışma dalı: `cloudflare/migrate-existing-cms`.
+Dal: `cloudflare/migrate-existing-cms`; PR: #1; taban: `879a2b71c7c6720307c8916493c8929ead33ff5b`.
 
-## Başarılı yerel kontroller
+## Geçen kontroller
 
-- Node.js 24.22.1 ile derleme; tek Worker modülü üretildi.
-- Mevcut CMS testleri: taslak/yayın ayrımı, kalıcı kayıt, revizyon çakışması, kaynak kontrolü ve dosya yükleme.
-- Mevcut SEO testleri: 27 dil/sayfa birleşimi, canonical, yapılandırılmış veri, dil bağlantıları, yayımlanmamış blog dillerinin saklanması, sitemap ve 404.
-- Yeni güvenlik testleri: gerçek RSA imzaları; sahte Sites/e-posta başlıkları; yanlış imza, süre, issuer, audience, kullanıcı, algoritma ve anahtar; eksik yapılandırma; sertifika sunucusu hatası; panel/statik yönetici dosyalarının korunması; CSRF.
-- Hatalı içerik yapısı, zararlı nesne alanları, büyük istek, negatif revizyon, bozuk JSON/form, görsel boyutu ve JPEG/MP4 imza kontrolleri.
-- Mevcut tablo üzerinde SQL kurulumunun tekrar çalıştırılması kayıtları koruyor.
-- Cloudflare'ın gerçek yerel çalışma motoru (Wrangler bağımlılığı Miniflare/workerd): imzalı Access oturumu, D1 taslak/yayın ayrımı, PNG'nin R2'ye yüklenip okunması, MP4 kısmi yanıtı (`206`), normal medya yanıtı (`200`), yetkisiz panelin reddi.
-- `git diff --check` temiz. `docs/`, ziyaretçi CSS/JS/içerik/logo dosyaları ve panel CSS'i başlangıçla aynı.
+- `pnpm run build` — geçti; Worker modülü üretildi.
+- `node test-cms.mjs` — geçti; D1 oturumlu giriş, taslak/yayın, blog, revizyon çakışması ve içerik doğrulama.
+- `node test-seo.mjs` — geçti; üç dilde 27 sayfa birleşimi, metadata, sitemap ve yayımlanmamış dil kontrolleri.
+- `node test-security.mjs` — geçti; oturum çerezi, veritabanındaki yalnızca oturum özeti, çıkış, anahtar değişikliği, süre/boşta kalma, sahte başlık, CSRF, HTTPS, istek sınırı, eşzamanlı kaba kuvvet, hesap genel sınırı ve yapılandırma yokluğu.
+- `node test-runtime.mjs` — geçti; Cloudflare workerd üzerinde login/logout, gerçek yerel D1, taslak/yayın, blog, logo, yükleme reddi ve R2/dış kimlik hizmeti olmaması.
+- Yükleme, hem panelde devre dışı hem API'de `503`; D1 içerik doğrulamaları, mevcut statik görseller ve mevcut içerik adresleri korunuyor.
+- `git diff --check` — geçmeli; `docs/`, ziyaretçi JS/CSS/içerik/logo değişmemiş.
 
-## Tamamlanması gereken kontroller
+## Kalan harici kontroller
 
-- `wrangler deploy --dry-run` başlatıldı; Windows çalışma alanı üst klasörü için esbuild “Erişim engellendi” hatası verdi. Ek okuma izninden sonra da aynı hata sürdü. Bu kontrol başarılı olarak raporlanmıyor. PR iş akışına Linux üzerinde aynı dağıtımsız kontrol eklendi; GitHub'a gönderilince sonucu ayrıca incelenmeli.
-- Cloudflare hesabına bağlanılmadı; gerçek D1 şeması/kimliği, R2 kovası, Access uygulaması ve yetki politikaları doğrulanmadı. Yerel motor testinde geçici kaynaklar ve yalnızca test için üretilen RSA anahtarları kullanıldı.
-- Gerçek Access giriş/çıkış ekranı, gerçek dosyalarla 40 MB video yükleme, CPU/bellek kotası ve mobil/masaüstü tarayıcı kabul testi yapılmalı.
-- Özel live/draft yedeği ve yüklenen medya teslim edilmedi; gerçek veri aktarımı ve geri yükleme testi yapılmadı.
-- GitHub bağlantısı son kontrolde depo için `push: false` bildiriyordu. Uzak dal ve Pull Request, yazma erişimi verilince oluşturulmalı.
+- `wrangler deploy --dry-run` Windows çalışma alanındaki üst dizin erişim hatası nedeniyle bu bilgisayarda çalışmadı. Uzak dağıtım yapmadı. PR iş akışı Linux ortamında dağıtımsız kontrolü çalıştıracak.
+- Cloudflare hesabına veya D1'a bağlanılmadı. SQL göçü uygulanmadı. Mevcut kayıtlar/dosyalar değiştirilmedi.
+- Gerçek yayından önce `drizzle/0001_admin_auth.sql` geçişini yedek sonrası uygula, Secret'ı ayarla ve ayrıca onaylanmış test Worker'ında giriş/telefon görünümü kontrolü yap.
+- Depo yazma denetimi son kontrolde `push: false`; aynı PR dalını güncellemek için GitHub yazma izni gerekli.
 
-Hiçbir canlı site dosyası yayımlanmadı; Cloudflare dağıtımı, uzak D1/R2 yazımı veya alan adı yönlendirmesi yapılmadı.
+Cloudflare dağıtımı, canlı site, DNS veya alan adı değişikliği yapılmadı.

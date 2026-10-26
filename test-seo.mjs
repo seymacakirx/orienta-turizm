@@ -8,6 +8,6 @@ content.posts=[{slug:'istanbul-notlari',author:'Test',image:'/assets/orienta-log
 let r=await get('/blog/istanbul-notlari?lang=tr'),html=await r.text();assert.equal(r.status,200);assert.match(html,/BlogPosting/);assert.match(html,/Tek sütun içerik/);assert.doesNotMatch(html,/class="columns"/);assert.doesNotMatch(html,/hreflang="en"/);
 assert.equal((await get('/blog/istanbul-notlari?lang=en')).status,404);assert.equal((await get('/services/missing?lang=tr')).status,404);
 html=await(await get('/sitemap.xml')).text();assert.match(html,/istanbul-notlari\?lang=tr/);assert.doesNotMatch(html,/istanbul-notlari\?lang=en/);assert.match(await(await get('/robots.txt')).text(),/Disallow: \/admin/);assert.match((await get('/admin')).headers.get('X-Robots-Tag'),/noindex/);
-assert.equal((await get('/admin')).status,403);
+assert.equal((await get('/admin')).status,303);
 assert.match(await(await worker.fetch(new Request('https://example.com/robots.txt'),{...env,STAGING:'true'})).text(),/Disallow: \/\n/);
 console.log('PASS: 27 localized SSR pages, metadata, published/draft blog, language alternates, 404, sitemap and admin noindex');

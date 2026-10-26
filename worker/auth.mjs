@@ -1,41 +1,70 @@
-// Access is the session provider. Never trust email headers or decode-only JWTs.
-let accessKeys;
-function decodeAccessPart(value) {
- if (!/^[A-Za-z0-9_-]+$/.test(value)) throw new Error('Invalid JWT');
- return Uint8Array.from(atob(value.replaceAll('-', '+').replaceAll('_', '/')), c => c.charCodeAt(0));
+// High-entropy generated credentials only; never use a human-chosen password here.
+const SESSION_COOKIE = '__Host-orienta_session';
+const SESSION_SECONDS = 8 * 60 * 60;
+const IDLE_SECONDS = 30 * 60;
+const hex = bytes => Array.from(new Uint8Array(bytes), n => n.toString(16).padStart(2, '0')).join('');
+async function digest(value) { return hex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))); }
+function authConfigured(env) { return /^[a-f0-9]{64}$/.test(env.ADMIN_KEY_SHA256 || ''); }
+async function credentialTag(env) { return digest((env.ADMIN_USERNAME || 'yonetici') + ':' + env.ADMIN_KEY_SHA256); }
+function sessionToken(request) {
+ const matches = (request.headers.get('Cookie') || '').split(';').map(s => s.trim()).filter(s => s.startsWith(SESSION_COOKIE + '='));
+ if (matches.length !== 1) return null;
+ const token = matches[0].slice(SESSION_COOKIE.length + 1);
+ return /^[a-f0-9]{64}$/.test(token) ? token : null;
 }
+function sessionCookie(token, seconds) { return `${SESSION_COOKIE}=${token}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=${seconds}`; }
 export async function authorizedAdmin(request, env) {
  try {
-  const issuer = env.ACCESS_ISSUER;
-  const audience = env.ACCESS_AUD;
-  const allowed = (env.ADMIN_EMAILS || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
-  if (!/^https:\/\/[a-z0-9-]+\.cloudflareaccess\.com$/.test(issuer || '') || !audience || !allowed.length) return false;
-  const token = request.headers.get('Cf-Access-Jwt-Assertion') || '';
-  if (token.length > 16384) return false;
-  const parts = token.split('.');
-  if (parts.length !== 3) return false;
-  const parse = s => JSON.parse(new TextDecoder().decode(decodeAccessPart(s)));
-  const header = parse(parts[0]), claims = parse(parts[1]);
-  const now = Math.floor(Date.now() / 1000);
-  if (header.alg !== 'RS256' || typeof header.kid !== 'string' ||
-      claims.iss !== issuer || !Array.isArray(claims.aud) || !claims.aud.includes(audience) ||
-      !Number.isFinite(claims.exp) || claims.exp <= now ||
-      !Number.isFinite(claims.iat) || claims.iat > now + 30 ||
-      (claims.nbf !== undefined && (!Number.isFinite(claims.nbf) || claims.nbf > now + 30)) ||
-      typeof claims.sub !== 'string' || !claims.sub || claims.type !== 'app' ||
-      typeof claims.email !== 'string' || !allowed.includes(claims.email.toLowerCase())) return false;
-  // Fixed, configured issuer only; token-supplied jku/x5u URLs are never followed.
-  if (!accessKeys || accessKeys.issuer !== issuer || accessKeys.expires <= Date.now()) {
-   const response = await fetch(issuer + '/cdn-cgi/access/certs', {signal: AbortSignal.timeout(5000), redirect: 'manual'});
-   if (!response.ok) return false;
-   const data = await response.json();
-   if (!Array.isArray(data.keys)) return false;
-   accessKeys = {issuer, keys: data.keys, expires: Date.now() + 300000};
-  }
-  // Unknown keys fail closed until the bounded cache refresh (at most 5 minutes).
-  const jwk = accessKeys.keys.find(k => k.kid === header.kid && k.kty === 'RSA' && (!k.alg || k.alg === 'RS256') && (!k.use || k.use === 'sig'));
-  if (!jwk) return false;
-  const key = await crypto.subtle.importKey('jwk', jwk, {name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256'}, false, ['verify']);
-  return await crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, decodeAccessPart(parts[2]), new TextEncoder().encode(parts[0] + '.' + parts[1]));
+  if (!authConfigured(env) || new URL(request.url).protocol !== 'https:') return false;
+  const token = sessionToken(request); if (!token) return false;
+  const now = Math.floor(Date.now() / 1000), hash = await digest(token);
+  const row = await env.DB.prepare('SELECT credential_tag, expires_at, last_seen FROM admin_sessions WHERE token_hash = ?').bind(hash).first();
+  if (!row || row.credential_tag !== await credentialTag(env) || row.expires_at <= now || row.last_seen <= now - IDLE_SECONDS) return false;
+  // Do not write D1 on every asset request. Never extend the absolute deadline.
+  if (row.last_seen < now - 60) await env.DB.prepare('UPDATE admin_sessions SET last_seen = ? WHERE token_hash = ? AND last_seen > ? AND expires_at > ?').bind(now, hash, now - IDLE_SECONDS, now).run();
+  return true;
  } catch { return false; }
+}
+async function loginLimit(env, key, now, limit) {
+ // Each increment/check is one atomic SQL statement, including concurrent requests.
+ const row = await env.DB.prepare(`INSERT INTO admin_login_limits (bucket, window_start, attempts) VALUES (?, ?, 1)
+ ON CONFLICT(bucket) DO UPDATE SET
+ attempts = CASE WHEN window_start <= ? THEN 1 ELSE attempts + 1 END,
+ window_start = CASE WHEN window_start <= ? THEN excluded.window_start ELSE window_start END
+ RETURNING attempts`).bind(key, now, now - 900, now - 900).first();
+ if (key === 'global' && row.attempts === 1) await env.DB.prepare('DELETE FROM admin_login_limits WHERE window_start <= ? AND bucket != ?').bind(now - 900, 'global').run();
+ return row.attempts <= limit;
+}
+async function authResponse(request, env) {
+ const u = new URL(request.url);
+ if (!['/api/auth/login', '/api/auth/logout'].includes(u.pathname)) return json({error:'Bulunamadı.'},404);
+ if (request.method !== 'POST') return json({error:'POST gerekli.'},405);
+ if (u.protocol !== 'https:' || request.headers.get('Origin') !== u.origin) return json({error:'Geçersiz istek kaynağı.'},403);
+ if (u.pathname.endsWith('/logout')) {
+  const token = sessionToken(request);
+  if (token) await env.DB.prepare('DELETE FROM admin_sessions WHERE token_hash = ?').bind(await digest(token)).run();
+  const r = json({ok:true});r.headers.set('Set-Cookie',sessionCookie('',0));return r;
+ }
+ if (!authConfigured(env)) return json({error:'Yönetici girişi henüz yapılandırılmadı.'},503);
+ const now = Math.floor(Date.now() / 1000);
+ if (!await loginLimit(env, 'global', now, 50)) return json({error:'Çok fazla giriş denemesi. 15 dakika sonra tekrar deneyin.'},429);
+ const ipKey = await digest((request.headers.get('CF-Connecting-IP') || 'unknown') + ':' + env.ADMIN_KEY_SHA256);
+ if (!await loginLimit(env, ipKey, now, 5)) return json({error:'Çok fazla giriş denemesi. 15 dakika sonra tekrar deneyin.'},429);
+ const raw = await boundedBody(request,2048);
+ if (raw === null) return json({error:'İstek çok büyük.'},413);
+ let body;try { body = JSON.parse(raw); } catch { return json({error:'Geçersiz istek.'},400); }
+ const supplied = typeof body?.key === 'string' ? body.key : '';
+ const actual = await digest(supplied);
+ // Fixed-length comparison; the stored value verifies a 256-bit random key,
+ // not a low-entropy password. The setup tool generates the only supported format.
+ let mismatch = 0;for(let i=0;i<64;i++) mismatch |= actual.charCodeAt(i) ^ env.ADMIN_KEY_SHA256.charCodeAt(i);
+ if (mismatch || !/^ot1_[A-Za-z0-9_-]{43}$/.test(supplied) || body?.username !== (env.ADMIN_USERNAME || 'yonetici')) return json({error:'Kullanıcı adı veya giriş anahtarı hatalı.'},401);
+ await env.DB.prepare('DELETE FROM admin_sessions WHERE expires_at <= ? OR last_seen <= ?').bind(now, now-IDLE_SECONDS).run();
+ await env.DB.prepare('DELETE FROM admin_login_limits WHERE window_start <= ?').bind(now-900).run();
+ // Rotate on login. Never adopt a client-supplied session identifier.
+ const old = sessionToken(request);
+ if (old) await env.DB.prepare('DELETE FROM admin_sessions WHERE token_hash = ?').bind(await digest(old)).run();
+ const token = hex(crypto.getRandomValues(new Uint8Array(32)));
+ await env.DB.prepare('INSERT INTO admin_sessions (token_hash, credential_tag, expires_at, last_seen) VALUES (?, ?, ?, ?)').bind(await digest(token),await credentialTag(env),now+SESSION_SECONDS,now).run();
+ const r=json({ok:true});r.headers.set('Set-Cookie',sessionCookie(token,SESSION_SECONDS));return r;
 }

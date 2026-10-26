@@ -55,14 +55,3 @@ async function boundedBody(request, limit, binary = false) {
  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
  return binary ? bytes : new TextDecoder().decode(bytes);
 }
-
-async function boundedForm(request, limit) {
- let length = 0;
- if (!request.body) throw new Error('Missing form');
- const body = request.body.pipeThrough(new TransformStream({transform(chunk, controller) {
-  length += chunk.byteLength;
-  if (length > limit) throw new RangeError('Upload too large');
-  controller.enqueue(chunk);
- }}));
- return new Response(body, {headers: {'Content-Type': request.headers.get('Content-Type') || ''}}).formData();
-}
