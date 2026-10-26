@@ -1,0 +1,33 @@
+import {createRequire} from 'node:module';
+import fs from 'node:fs';
+import assert from 'node:assert/strict';
+import {databaseFixture,cookie,origin} from './test-helpers.mjs';
+const f=databaseFixture();
+const require=createRequire(fs.realpathSync('node_modules/wrangler/package.json'));
+const {Miniflare,convertV4MiniflareOptions}=require('miniflare');
+let outgoing=0;
+const mf=new Miniflare(convertV4MiniflareOptions({modules:true,script:fs.readFileSync('dist/server/index.js','utf8'),compatibilityDate:'2026-10-26',d1Databases:['DB'],bindings:{STAGING:'true',ADMIN_USERNAME:'yonetici',ADMIN_KEY_SHA256:f.env.ADMIN_KEY_SHA256},outboundService:async()=>{outgoing++;return new Response('No external auth',{status:403})}}));
+try{
+ const db=await mf.getD1Database('DB');
+ for(const file of ['0000_cms.sql','0001_admin_auth.sql'])await db.exec(fs.readFileSync('drizzle/'+file,'utf8').split('\n').filter(l=>!l.trim().startsWith('--')).join(' '));
+ let r=await mf.dispatchFetch(origin+'/?lang=tr');assert.equal(r.status,200);assert.match(await r.text(),/Orienta/);
+ assert.equal((await mf.dispatchFetch(origin+'/api/admin/content')).status,403);
+ assert.equal((await mf.dispatchFetch(origin+'/admin/login')).status,200);
+ const logged=await mf.dispatchFetch(origin+'/api/auth/login',{method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},body:JSON.stringify({username:'yonetici',key:f.key})});assert.equal(logged.status,200,await logged.clone().text());
+ const headers={Cookie:cookie(logged),Origin:origin,'Content-Type':'application/json'};
+ assert.equal((await mf.dispatchFetch(origin+'/admin',{headers})).status,200);
+ const content=await(await mf.dispatchFetch(origin+'/api/content')).json();content.texts.tr.hero='Runtime publish';
+ content.posts=[{slug:'test-blog',tr:{ready:'evet',title:'Deneme',summary:'Özet',blocks:[{text:'Test yazısı'}]}}];
+ const save=await mf.dispatchFetch(origin+'/api/admin/draft',{method:'PUT',headers,body:JSON.stringify({content,revision:0})});assert.equal(save.status,200,await save.text());
+ assert.notEqual((await(await mf.dispatchFetch(origin+'/api/content')).json()).texts.tr.hero,content.texts.tr.hero);
+ assert.equal((await mf.dispatchFetch(origin+'/api/admin/publish',{method:'PUT',headers,body:JSON.stringify({content,revision:0})})).status,200);
+ assert.equal((await(await mf.dispatchFetch(origin+'/api/content')).json()).texts.tr.hero,content.texts.tr.hero);
+ assert.match(await(await mf.dispatchFetch(origin+'/blog/test-blog?lang=tr')).text(),/Test yazısı/);
+ assert.equal((await mf.dispatchFetch(origin+'/api/admin/upload',{method:'POST',headers,body:'disabled'})).status,503);
+ assert.equal((await mf.dispatchFetch(origin+'/assets/orienta-logo.png')).status,200);
+ assert.equal((await mf.dispatchFetch(origin+'/media/uploads/abc.jpg')).status,404);
+ assert.equal((await mf.dispatchFetch(origin+'/api/auth/logout',{method:'POST',headers})).status,200);
+ assert.equal((await mf.dispatchFetch(origin+'/api/admin/content',{headers})).status,403);
+ assert.equal(outgoing,0);
+ console.log('PASS: real Workers runtime, D1 login/logout, draft/publish, blog, existing logo, uploads disabled, no R2 and no external authentication requests.');
+}finally{await mf.dispose();f.db.close()}

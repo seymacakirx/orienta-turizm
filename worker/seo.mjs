@@ -2,6 +2,7 @@ const xmlEscape=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;',
 const plain=s=>String(s||'').replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim();
 async function seoResponse(request,env){
  const u=new URL(request.url),path=u.pathname;
+ if(path==='/robots.txt'&&env.STAGING==='true')return new Response('User-agent: *\nDisallow: /\n',{headers:{'Content-Type':'text/plain; charset=utf-8'}});
  if(path==='/robots.txt')return new Response('User-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /api/\nSitemap: '+u.origin+'/sitemap.xml\n',{headers:{'Content-Type':'text/plain; charset=utf-8'}});
  const res=await api(new Request(u.origin+'/api/content'),env,DEFAULTS),doc=await res.json();
  const languages=['tr','en','ru'];const pageURL=(p,l)=>u.origin+p+'?lang='+l;
