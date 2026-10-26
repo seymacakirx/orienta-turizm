@@ -1,5 +1,19 @@
 # Orienta İstanbul — kaynak kod teslimi
 
+## Cloudflare taşıma dalı
+
+Mevcut tasarım korunarak Workers/D1/R2 ve Cloudflare Access uyarlaması hazırlandı.
+Kurulum, güvenli giriş, özel içerik yedeği aktarımı, test ve geri dönüş adımları için
+[Türkçe Cloudflare kurulum rehberini](CLOUDFLARE-KURULUM.md) okuyun.
+`docs/` GitHub Pages yayını değişmez. Dağıtım veya alan adı yönlendirmesi otomatik yapılmaz.
+`wrangler.jsonc` yalnızca test ortamı içindir; gerçek DB kimliği ve Access ayarları doldurulmalıdır.
+
+Bu dalda `worker/auth.mjs` Sites başlıklarının yerini alır; `.openai/hosting.json` gerekli değildir.
+Node 24+ ile `npm run build` ve `npm test`; kilitli Cloudflare aracı için `pnpm install --frozen-lockfile`
+ve dağıtımsız paket kontrolü için `pnpm run cf:check` kullanılır.
+Alttaki Sites açıklamaları özgün teslimatın tarihsel bağlamıdır; güncel taşıma işlemlerinde
+yeni rehberi izleyin.
+
 Bu depo ziyaretçi web sitesi, blog, içerik yönetim paneli (back-office) ve sunucu kodunu birlikte içerir. Mevcut ChatGPT Sites sürümünün kaynak kodudur; GitHub Pages için hazırlanmış bir statik site değildir.
 
 ## Dosyalar

@@ -1,4 +1,4 @@
-const OWNER='dogancancelik1@gmail.com';
+
 function normalizeContent(doc){
  const names={tr:['Çeviri Hizmetleri','Tercüman Hizmetleri'],en:['Translation Services','Interpreting Services'],ru:['Услуги перевода','Услуги переводчика']};
  const labels={tr:['E-Posta','Adres'],en:['Email','Address'],ru:['Электронная почта','Адрес']};
@@ -17,8 +17,7 @@ export async function api(request,env,defaults){
  const u=new URL(request.url),path=u.pathname;
  const admin=path.startsWith('/api/admin');
  if(admin){
-  const email=request.headers.get('oai-authenticated-user-email');
-  if(!request.headers.get('oai-authenticated-user-id')||email?.toLowerCase()!==OWNER)return json({error:'Bu alan yalnızca site sahibine açıktır. ChatGPT hesabınızla giriş yapın.'},403);
+  if(!await authorizedAdmin(request,env))return json({error:'Yetkili Cloudflare Access oturumu gerekli. Paneli yeniden açarak giriş yapın.'},403);
   if(request.method!=='GET'&&request.headers.get('Origin')!==u.origin)return json({error:'Geçersiz istek kaynağı.'},403);
  }
  if(path==='/api/geo')return json({country_code:request.cf?.country||''});
@@ -31,9 +30,10 @@ export async function api(request,env,defaults){
  if(path==='/api/admin/content'&&request.method==='GET')return json({draft:await read('draft'),live:await read('live')});
  if((path==='/api/admin/draft'||path==='/api/admin/publish')&&request.method==='PUT'){
   if(Number(request.headers.get('Content-Length'))>1500000)return json({error:'İçerik çok büyük.'},413);
-  const raw=await request.text();if(raw.length>1500000)return json({error:'İçerik çok büyük.'},413);
+  const raw=await boundedBody(request,1500000);if(raw===null)return json({error:'İçerik çok büyük.'},413);
   let body;try{body=JSON.parse(raw)}catch{return json({error:'Geçersiz içerik.'},400)}
-  const doc=body.content;
+  const doc=body?.content;
+  if(!validDocument(doc,defaults)||!Number.isSafeInteger(body?.revision)||body.revision<0)return json({error:'İçerik yapısı geçersiz.'},400);
   if(!doc||!doc.config||!doc.texts||!Array.isArray(doc.services)||doc.services.length!==7||!['tr','en','ru'].every(l=>doc.texts[l])||!Number.isInteger(body.revision))return json({error:'İçerik alanları eksik.'},400);
   if(doc.posts!==undefined&&(!Array.isArray(doc.posts)||doc.posts.some(p=>!p||! /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(p.slug)||!['tr','en','ru'].every(l=>!p[l]||typeof p[l]==='object'))||new Set(doc.posts.map(p=>p.slug)).size!==doc.posts.length))return json({error:'Blog adresleri benzersiz olmalı; küçük Latin harfleri, rakamlar ve tire kullanın.'},400);
   const id=path.endsWith('publish')?'live':'draft',now=new Date().toISOString();
@@ -44,7 +44,7 @@ export async function api(request,env,defaults){
  }
  if(path==='/api/admin/upload'&&request.method==='POST'){
   if(Number(request.headers.get('Content-Length'))>42*1024*1024)return json({error:'Dosya en fazla 40 MB olabilir.'},413);
-  const form=await request.formData(),file=form.get('file');
+  let form;try{form=await boundedForm(request,42*1024*1024)}catch(e){return json({error:e instanceof RangeError?'Dosya en fazla 40 MB olabilir.':'Geçersiz dosya formu.'},e instanceof RangeError?413:400)}const file=form.get('file');
   if(!file||typeof file.arrayBuffer!=='function')return json({error:'Bir dosya seçin.'},400);
   const isVideo=file.type==='video/mp4';if(file.size>(isVideo?40:8)*1024*1024)return json({error:isVideo?'Video en fazla 40 MB olabilir.':'Görsel en fazla 8 MB olabilir.'},413);
   const bytes=new Uint8Array(await file.arrayBuffer());

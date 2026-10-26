@@ -2,9 +2,11 @@ import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
 import fs from 'node:fs';
 import worker from './dist/server/index.js';
+import {accessFixture} from './test-access-fixture.mjs';
+const access=await accessFixture();
 const db=new DatabaseSync(':memory:');db.exec(fs.readFileSync(new URL('./drizzle/0000_cms.sql',import.meta.url),'utf8'));
 const bucket=new Map();
-const env={
+const env={...access.env,
  DB:{prepare(sql){let args=[];return {
   bind(...values){args=values;return this},
   async first(){return db.prepare(sql).get(...args)||null},
@@ -13,12 +15,12 @@ const env={
  BUCKET:{async put(k,v,options){bucket.set(k,{v,options})},async get(k){return bucket.get(k)}}
 };
 const origin='https://example.test';
-const owner={'oai-authenticated-user-id':'owner-user','oai-authenticated-user-email':'dogancancelik1@gmail.com',Origin:origin,'Content-Type':'application/json'};
+const owner={'Cf-Access-Jwt-Assertion':await access.token(),Origin:origin,'Content-Type':'application/json'};
 async function call(path,method='GET',body,headers=owner){const res=await worker.fetch(new Request(origin+path,{method,headers,body:body===undefined?undefined:JSON.stringify(body)}),env);return{status:res.status,data:await res.json()};}
 const initial=(await call('/api/content')).data;assert(initial.services.length===7);
 assert.equal((await call('/api/admin/content','GET',undefined,{})).status,403);
 assert.equal((await call('/api/admin/draft','PUT',{content:initial,revision:0},{...owner,Origin:'https://evil.test'})).status,403);
-assert.equal((await call('/api/admin/draft','PUT',{content:initial,revision:0},{...owner,'oai-authenticated-user-email':'viewer@example.test'})).status,403);
+assert.equal((await call('/api/admin/draft','PUT',{content:initial,revision:0},{...owner,'Cf-Access-Jwt-Assertion':await access.token({email:'viewer@example.test'})})).status,403);
 const updated=structuredClone(initial);updated.texts.tr.hero='Kalıcı içerik denemesi';
 assert.equal((await call('/api/admin/draft','PUT',{content:updated,revision:0})).status,200);
 assert.notEqual((await call('/api/content')).data.texts.tr.hero,updated.texts.tr.hero);
@@ -34,3 +36,28 @@ const proper=await worker.fetch(new Request(origin+'/api/admin/upload',{method:'
 const invalid=new FormData();invalid.append('file',new Blob(['<script>alert(1)</script>'],{type:'image/png'}),'x.png');
 assert.equal((await worker.fetch(new Request(origin+'/api/admin/upload',{method:'POST',headers:h,body:invalid}),env)).status,400);
 console.log('PASS: owner authorization, origin checks, persistent draft/live isolation, revision conflicts and validated uploads.');
+
+// Malformed content must not destroy a working live document.
+for(const mutate of [d=>d.services[0].id='"><script>',d=>d.texts.tr.hero=42,d=>d.config.phone={},d=>d.config.services.guide={tr:{id:'bad'}},d=>d.posts=[{slug:'ok',tr:{blocks:[{text:42}]}}]]) {
+ const bad=structuredClone(updated);mutate(bad);
+ assert.equal((await call('/api/admin/publish','PUT',{content:bad,revision:1})).status,400);
+}
+assert.equal((await call('/api/admin/publish','PUT',null)).status,400);
+const malicious=JSON.parse(JSON.stringify(updated));malicious.config.services=JSON.parse('{"__proto__":{}}');
+assert.equal((await call('/api/admin/draft','PUT',{content:malicious,revision:1})).status,400);
+assert.equal((await call('/api/admin/draft','PUT',{content:updated,revision:-1})).status,400);
+assert.equal((await call('/api/admin/draft','PUT',{content:updated,revision:1,padding:'x'.repeat(1500000)})).status,413);
+assert.equal((await worker.fetch(new Request(origin+'/api/admin/draft',{method:'PUT',headers:owner,body:'not json'}),env)).status,400);
+assert.equal((await worker.fetch(new Request(origin+'/api/admin/upload',{method:'POST',headers:owner,body:'invalid multipart'}),env)).status,400);
+for(const [type,bytes,name] of [['image/jpeg',new Uint8Array([255,216,255,224]),'photo.jpg'],['video/mp4',new Uint8Array([0,0,0,24,102,116,121,112,105,115,111,109]),'video.mp4']]) {
+ const f=new FormData();f.append('file',new Blob([bytes],{type}),name);
+ assert.equal((await worker.fetch(new Request(origin+'/api/admin/upload',{method:'POST',headers:h,body:f}),env)).status,200);
+}
+const oversized=new FormData();oversized.append('file',new Blob([new Uint8Array(8*1024*1024+1)],{type:'image/png'}),'big.png');
+assert.equal((await worker.fetch(new Request(origin+'/api/admin/upload',{method:'POST',headers:h,body:oversized}),env)).status,413);
+assert.equal((await call('/api/content')).data.texts.tr.hero,updated.texts.tr.hero);
+// The user's pre-created table can be left in place; no data is removed.
+db.exec(fs.readFileSync(new URL('./drizzle/0000_cms.sql',import.meta.url),'utf8'));
+assert.equal(db.prepare('SELECT COUNT(*) AS n FROM cms_documents').get().n,2);
+access.restore();
+console.log('PASS: content validation, request byte limits, JPEG/MP4 signatures, file-size limits, non-destructive schema rerun.');
