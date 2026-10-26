@@ -2,7 +2,7 @@
 window.SITE_CONFIG = {
   pageTitle:'Orienta İstanbul', metaDescription:'İstanbul’da rehberli geziler ve size özel deneyimler.', heroSideText:'41°00′ N · 28°58′ E — ISTANBUL', footerPlace:'ISTANBUL · TÜRKİYE', brand: 'ORIENTA', brandSubtitle: 'İSTANBUL TURİZM',
   logo: '/orienta-turizm/assets/orienta-logo.png', // Örnek: /assets/logo.png
-  video: '', // Örnek: /assets/istanbul-20sn.mp4 (yaklaşık 20 saniyelik dosya)
+  video: '/orienta-turizm/assets/istanbul-banner.mp4',
   videoLoopSeconds: 20,
   poster: 'https://images.unsplash.com/photo-1524231757912-21f4fe3a7200?auto=format&fit=crop&w=2200&q=85',
   companyName: '', address: '', phone: '', email: '',
